@@ -21,6 +21,7 @@
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * Authors: Peter Hutterer
+ *          Stephen Chandler "Lyude" Paul
  */
 
 #ifdef HAVE_CONFIG_H
@@ -88,6 +89,8 @@ Atom prop_capabilities = 0;
 Atom prop_resolution = 0;
 Atom prop_area = 0;
 Atom prop_softbutton_areas = 0;
+Atom prop_trackpoint_mode = 0;
+Atom prop_trackpoint_softbutton_areas = 0;
 Atom prop_noise_cancellation = 0;
 Atom prop_product_id = 0;
 Atom prop_device_node = 0;
@@ -171,6 +174,18 @@ InitSoftButtonProperty(InputInfoPtr pInfo)
     values[7] = para->softbutton_areas[1][3];
     prop_softbutton_areas =
         InitAtom(pInfo->dev, SYNAPTICS_PROP_SOFTBUTTON_AREAS, 32, 8, values);
+
+    values[0] = para->trackpoint_softbutton_areas[0][0];
+    values[1] = para->trackpoint_softbutton_areas[0][1];
+    values[2] = para->trackpoint_softbutton_areas[0][2];
+    values[3] = para->trackpoint_softbutton_areas[0][3];
+    values[4] = para->trackpoint_softbutton_areas[1][0];
+    values[5] = para->trackpoint_softbutton_areas[1][1];
+    values[6] = para->trackpoint_softbutton_areas[1][2];
+    values[7] = para->trackpoint_softbutton_areas[1][3];
+    prop_trackpoint_softbutton_areas =
+        InitAtom(pInfo->dev, SYNAPTICS_PROP_TRACKPOINT_SOFTBUTTON_AREAS, 32, 8,
+                 values);
 }
 
 void
@@ -526,7 +541,7 @@ SetProperty(DeviceIntPtr dev, Atom property, XIPropertyValuePtr prop,
 
         off = *(CARD8 *) prop->data;
 
-        if (off > 2)
+        if (off > 3)
             return BadValue;
 
         para->touchpad_off = off;
@@ -705,6 +720,19 @@ SetProperty(DeviceIntPtr dev, Atom property, XIPropertyValuePtr prop,
 
         memcpy(para->softbutton_areas[0], areas, 4 * sizeof(int));
         memcpy(para->softbutton_areas[1], areas + 4, 4 * sizeof(int));
+    }
+    else if (property == prop_trackpoint_softbutton_areas) {
+        int *areas;
+
+        if (prop->size != 8 || prop->format != 32 || prop->type != XA_INTEGER)
+            return BadMatch;
+
+        areas = (int *) prop->data;
+        if (!SynapticsIsSoftButtonAreasValid(areas))
+            return BadValue;
+
+        memcpy(para->trackpoint_softbutton_areas[0], areas, 4 * sizeof(int));
+        memcpy(para->trackpoint_softbutton_areas[1], areas + 4, 4 * sizeof(int));
     }
     else if (property == prop_noise_cancellation) {
         INT32 *hyst;

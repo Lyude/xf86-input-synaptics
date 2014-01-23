@@ -1,5 +1,6 @@
 /*
  * Copyright © 2008 Red Hat, Inc.
+ * Copyright © 2014 Stephen Chandler "Lyude" Paul
  *
  * Permission to use, copy, modify, distribute, and sell this software
  * and its documentation for any purpose is hereby granted without
@@ -21,6 +22,7 @@
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * Authors: Peter Hutterer
+ *          Stephen Chandler "Lyude" Paul
  */
 
 #ifndef _SYNAPTICS_PROPERTIES_H_
@@ -148,6 +150,12 @@
 
 /* 32 bit, 4 values, left, right, top, buttom */
 #define SYNAPTICS_PROP_SOFTBUTTON_AREAS "Synaptics Soft Button Areas"
+
+/* 32 bit, 4 values, left, right, top, bottom */
+#define SYNAPTICS_PROP_TRACKPOINT_SOFTBUTTON_AREAS "Synaptics TrackPoint Soft Button Areas"
+
+/* 8 bit (BOOL) */
+#define SYNAPTICS_PROP_TRACKPOINT_MODE "Synaptics TrackPoint Mode"
 
 /* 32 Bit Integer, 2 values, horizontal hysteresis, vertical hysteresis */
 #define SYNAPTICS_PROP_NOISE_CANCELLATION "Synaptics Noise Cancellation"

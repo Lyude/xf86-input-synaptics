@@ -15,6 +15,7 @@
  * Copyright © 2008 Fedor P. Goncharov
  * Copyright © 2008-2012 Red Hat, Inc.
  * Copyright © 2011 The Chromium OS Authors
+ * Copyright © 2014 Stephen Chandler "Lyude" Paul
  *
  * Permission to use, copy, modify, distribute, and sell this software
  * and its documentation for any purpose is hereby granted without
@@ -51,6 +52,7 @@
  *      Fred Hucht <fred@thp.Uni-Duisburg.de>
  *      Fedor P. Goncharov <fedgo@gorodok.net>
  *      Simon Thum <simon.thum@gmx.de>
+ *      Stephen Chandler "Lyude" Paul <thatslyude@gmail.com>
  *
  * Trademarks are the property of their respective owners.
  */
@@ -452,7 +454,7 @@ SynapticsIsSoftButtonAreasValid(int *values)
 }
 
 static void
-set_softbutton_areas_option(InputInfoPtr pInfo)
+set_softbutton_areas_option(InputInfoPtr pInfo, const char * prop_name)
 {
     SynapticsPrivate *priv = pInfo->private;
     SynapticsParameters *pars = &priv->synpara;
@@ -467,7 +469,7 @@ set_softbutton_areas_option(InputInfoPtr pInfo)
     if (!pars->clickpad)
         return;
 
-    option_string = xf86SetStrOption(pInfo->options, "SoftButtonAreas", NULL);
+    option_string = xf86SetStrOption(pInfo->options, prop_name, NULL);
     if (!option_string)
         return;
 
@@ -512,8 +514,15 @@ set_softbutton_areas_option(InputInfoPtr pInfo)
     if (!SynapticsIsSoftButtonAreasValid(values))
         goto fail;
 
-    memcpy(pars->softbutton_areas[0], values, 4 * sizeof(int));
-    memcpy(pars->softbutton_areas[1], values + 4, 4 * sizeof(int));
+    if (strcmp(prop_name, "SoftButtonAreas") == 0) {
+        memcpy(pars->softbutton_areas[0], values, 4 * sizeof(int));
+        memcpy(pars->softbutton_areas[1], values + 4, 4 * sizeof(int));
+    }
+    else {
+        memcpy(pars->trackpoint_softbutton_areas[0], values, 4 * sizeof(int));
+        memcpy(pars->trackpoint_softbutton_areas[1], values + 4, 4 * sizeof(int));
+    }
+    
 
     free(option_string);
 
@@ -521,8 +530,8 @@ set_softbutton_areas_option(InputInfoPtr pInfo)
 
  fail:
     xf86IDrvMsg(pInfo, X_ERROR,
-                "invalid SoftButtonAreas value '%s', keeping defaults\n",
-                option_string);
+                "invalid %s value '%s', keeping defaults\n",
+                prop_name, option_string);
     free(option_string);
 }
 
@@ -724,7 +733,8 @@ set_default_parameters(InputInfoPtr pInfo)
                     "TopEdge is bigger than BottomEdge. Fixing.\n");
     }
 
-    set_softbutton_areas_option(pInfo);
+    set_softbutton_areas_option(pInfo, "SoftButtonAreas");
+    set_softbutton_areas_option(pInfo, "TrackPointSoftButtonAreas");
 }
 
 static double
@@ -1382,6 +1392,18 @@ static Bool
 is_inside_button_area(SynapticsParameters * para, int which, int x, int y)
 {
     Bool inside_area = TRUE;
+    int * current_softbutton_areas[2];
+
+    /* If we're in trackpoint mode, honor the trackpoint softbutton locations
+     * instead */
+    if ((enum OffState)para->touchpad_off == TOUCHPAD_TRACKPOINT_MODE) {
+        current_softbutton_areas[0] = para->trackpoint_softbutton_areas[0];
+        current_softbutton_areas[1] = para->trackpoint_softbutton_areas[1];
+    }
+    else {
+        current_softbutton_areas[0] = para->softbutton_areas[0];
+        current_softbutton_areas[1] = para->softbutton_areas[1];
+    }
 
     enum {
         LEFT = 0,
@@ -1390,23 +1412,23 @@ is_inside_button_area(SynapticsParameters * para, int which, int x, int y)
         BOTTOM = 3
     };
 
-    if (para->softbutton_areas[which][LEFT] == 0 &&
-        para->softbutton_areas[which][RIGHT] == 0 &&
-        para->softbutton_areas[which][TOP] == 0 &&
-        para->softbutton_areas[which][BOTTOM] == 0)
+    if (current_softbutton_areas[which][LEFT] == 0 &&
+        current_softbutton_areas[which][RIGHT] == 0 &&
+        current_softbutton_areas[which][TOP] == 0 &&
+        current_softbutton_areas[which][BOTTOM] == 0)
         return FALSE;
 
-    if (para->softbutton_areas[which][LEFT] &&
-        x < para->softbutton_areas[which][LEFT])
+    if (current_softbutton_areas[which][LEFT] &&
+        x < current_softbutton_areas[which][LEFT])
         inside_area = FALSE;
-    else if (para->softbutton_areas[which][RIGHT] &&
-             x > para->softbutton_areas[which][RIGHT])
+    else if (current_softbutton_areas[which][RIGHT] &&
+             x > current_softbutton_areas[which][RIGHT])
         inside_area = FALSE;
-    else if (para->softbutton_areas[which][TOP] &&
-             y < para->softbutton_areas[which][TOP])
+    else if (current_softbutton_areas[which][TOP] &&
+             y < current_softbutton_areas[which][TOP])
         inside_area = FALSE;
-    else if (para->softbutton_areas[which][BOTTOM] &&
-             y > para->softbutton_areas[which][BOTTOM])
+    else if (current_softbutton_areas[which][BOTTOM] &&
+             y > current_softbutton_areas[which][BOTTOM])
         inside_area = FALSE;
 
     return inside_area;
@@ -2078,6 +2100,7 @@ ComputeDeltas(SynapticsPrivate * priv, const struct SynapticsHwState *hw,
         priv->vert_scroll_edge_on || priv->horiz_scroll_edge_on ||
         priv->vert_scroll_twofinger_on || priv->horiz_scroll_twofinger_on ||
         priv->circ_scroll_on || priv->prevFingers != hw->numFingers ||
+        priv->synpara.touchpad_off == TOUCHPAD_TRACKPOINT_MODE ||
         (moving_state == MS_TOUCHPAD_RELATIVE && hw->numFingers != 1)) {
         /* reset packet counter. */
         priv->count_packet_finger = 0;
@@ -2849,6 +2872,17 @@ HandleState(InputInfoPtr pInfo, struct SynapticsHwState *hw, CARD32 now,
 
     /* these two just update hw->left, right, etc. */
     update_hw_button_state(pInfo, hw, priv->old_hw_state, now, &delay);
+
+    /* If we're in trackpoint mode, then we want to suppress any changes in the
+     * hardware state except for button presses
+     */
+    if (para->touchpad_off == TOUCHPAD_TRACKPOINT_MODE &&
+        hw->left == priv->old_hw_state->left &&
+        hw->right == priv->old_hw_state->right &&
+        hw->middle == priv->old_hw_state->middle) {
+        UpdateTouchState(pInfo, hw);
+        return delay;
+    }
 
     /* now we know that these _coordinates_ aren't in the area.
        invalid are: x, y, z, numFingers, fingerWidth

@@ -59,6 +59,7 @@ enum OffState {
     TOUCHPAD_ON = 0,
     TOUCHPAD_OFF = 1,
     TOUCHPAD_TAP_OFF = 2,
+    TOUCHPAD_TRACKPOINT_MODE = 3
 };
 
 enum TapEvent {
@@ -172,6 +173,7 @@ typedef struct _SynapticsParameters {
                                  * 0 : Not off
                                  * 1 : Off
                                  * 2 : Only tapping and scrolling off
+                                 * 3 : Only trackpoint softbuttons are enabled
                                  */
     Bool locked_drags;          /* Enable locked drags */
     int locked_drag_time;       /* timeout for locked drags */
@@ -195,6 +197,9 @@ typedef struct _SynapticsParameters {
     unsigned int resolution_vert;       /* vertical resolution of touchpad in units/mm */
     int area_left_edge, area_right_edge, area_top_edge, area_bottom_edge;       /* area coordinates absolute */
     int softbutton_areas[2][4]; /* soft button area coordinates, 0 => right, 1 => middle button */
+    int trackpoint_softbutton_areas[2][4];  /* soft button area coordinates used for trackpoint mode,
+                                             * 0 => right, 1 => middle button
+                                             */
     int hyst_x, hyst_y;         /* x and y width of hysteresis box */
 } SynapticsParameters;
 

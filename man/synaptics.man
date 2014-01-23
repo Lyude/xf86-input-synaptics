@@ -228,6 +228,7 @@ l l.
 0	Touchpad is enabled
 1	Touchpad is switched off
 2	Only tapping and scrolling is switched off
+3	Only TrackPoint softbuttons are recognized, all other movement is disabled
 .TE
 Property: "Synaptics Off"
 .TP
@@ -447,6 +448,17 @@ soft button areas. Button areas may not overlap, however it is permitted for two
 buttons to share an edge value.
 Property: "Synaptics Soft Button Areas"
 .
+.TP
+.BI "Option \*qTrackPointSoftButtonAreas\*q \*q" "RBL RBR RBT RBB MBL MBR MBT MBB" \*q
+This option is only available on ClickPad devices. Some laptops have a
+TrackPoint on them, but rely on the ClickPad to provide softbuttons to replace
+the traditional physical buttons previously accompanied with most TrackPoints.
+This option is what specifies where these trackpoint buttons are located on the
+ClickPad. This option only has any effect when the ClickPad is in TrackPoint
+mode (\fBTouchpadOff\fR is set to 3). When in this mode, these softbutton areas
+will be used instead of \fBSoftButtonAreas\fR. The values for this setting
+follow the same format as the ones for \fBSoftButtonAreas\fR.
+Property: "Synaptics TrackPoint Soft Button Areas"
 
 .SH CONFIGURATION DETAILS
 .SS Area handling
@@ -817,6 +829,16 @@ default.
 This property is only available on ClickPad devices.
 The Right and middle soft button areas are used to support right and middle
 click actions on a ClickPad device. Providing 0 for all values of a given button
+disables the button area.
+
+32 bit, 8 values, RBL, RBR, RBT, RBB, MBL, MBR, MBT, MBB.
+
+.TP 7
+.BI "Synaptics TrackPoint Soft Button Areas"
+This property is only available on ClickPad devices.
+The right and middle soft button areas are used to support right and middle
+click actions on a ClickPad device when the ClickPad is in TrackPoint mode
+(\fBTouchpadOff\fR is set to 3). Providing 0 for all values of a given button
 disables the button area.
 
 32 bit, 8 values, RBL, RBR, RBT, RBB, MBL, MBR, MBT, MBB.
