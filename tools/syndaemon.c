@@ -256,7 +256,7 @@ trackpoint_activity(Display * display)
     /* Get current Trackpoint coordinates  */
     if (state) {
         data = state->data;
-        for(i=0; i<state->num_classes; ++i) {
+        for(i = 0; i < state->num_classes; ++i) {
             if (data->class == ValuatorClass) {
                 val_state = (XValuatorState *) data;
                 tppos = (CursorPosition *) val_state->valuators;
@@ -332,7 +332,7 @@ main_loop(Display * display, double keyboard_idle_time,
     double last_activity_time;
 
     if (monitor_keyboard)
-	keyboard_activity(display);
+        keyboard_activity(display);
 
     for (;;) {
         current_time = get_time();
@@ -350,15 +350,15 @@ main_loop(Display * display, double keyboard_idle_time,
             last_activity_time = current_time;
             idle_time = keyboard_idle_time;
         }
-	else if (pad_disabled) {
-	    if (last_activity_time > current_time)
-		last_activity_time = 0.0;
+        else if (pad_disabled) {
+            if (last_activity_time > current_time)
+                last_activity_time = 0.0;
 
-	    if (current_time > last_activity_time + idle_time) {
-		toggle_touchpad(True);
-		continue;
-	    }
-	}
+            if (current_time > last_activity_time + idle_time) {
+                toggle_touchpad(True);
+                continue;
+            }
+        }
         
         usleep(poll_delay);
     }
