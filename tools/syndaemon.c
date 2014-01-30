@@ -337,9 +337,6 @@ main_loop(Display * display, double keyboard_idle_time,
     for (;;) {
         current_time = get_time();
 
-        /* If system time goes backwards, touchpad can get locked. Make sure out
-         * last activity wasn't in the future and reset it if it was. */
-        
         if (monitor_trackpoint && trackpoint_activity(display)) {
             toggle_trackpoint();
             last_activity_time = current_time;
@@ -351,6 +348,8 @@ main_loop(Display * display, double keyboard_idle_time,
             idle_time = keyboard_idle_time;
         }
         else if (pad_disabled) {
+            /* If system time goes backwards, touchpad can get locked. Make sure
+             * out last activity wasn't in the future and reset it if it was. */
             if (last_activity_time > current_time)
                 last_activity_time = 0.0;
 
