@@ -22,6 +22,7 @@
  *
  * Authors:
  *      Peter Osterlund (petero2@telia.com)
+ *      Stephen Chandler "Lyude" Paul (thatslyude@gmail.com)
  */
 
 #ifdef HAVE_CONFIG_H
@@ -50,14 +51,17 @@
 enum TouchpadState {
     TouchpadOn = 0,
     TouchpadOff = 1,
-    TappingOff = 2
+    TappingOff = 2,
+    TrackpointMode = 3
 };
 
-static Bool pad_disabled
-    /* internal flag, this does not correspond to device state */ ;
+static Bool pad_disabled;
+static Bool trackpoint_mode;
+    /* internal flags, these do not correspond to device state */ ;
 static int ignore_modifier_combos;
 static int ignore_modifier_keys;
-static int monitor_trackpoint;
+static Bool monitor_trackpoint;
+static Bool monitor_keyboard;
 static int background;
 static const char *pid_file;
 static const char *trackpoint_name;
@@ -78,7 +82,11 @@ static void
 usage(void)
 {
     fprintf(stderr,
-            "Usage: syndaemon [-i idle-time] [-m poll-delay] [-d] [-t] [-k]\n");
+            "Usage: syndaemon [-i idle-time] [-b] [-T trackpoint-name]\n");
+    fprintf(stderr,
+            "                 [-I trackpoint-idle-time] [-m poll-delay]\n");
+    fprintf(stderr,
+            "                 [-d] [-t] [-k]\n");
     fprintf(stderr,
             "  -i How many seconds to wait after the last key press before\n");
     fprintf(stderr, "     enabling the touchpad. (default is 2.0s)\n");
@@ -91,8 +99,12 @@ usage(void)
     fprintf(stderr,
             "  -k Ignore modifier keys when monitoring keyboard activity.\n");
     fprintf(stderr, "  -K Like -k but also ignore Modifier+Key combos.\n");
+    fprintf(stderr, "  -B Monitor keyboard activity (default)\n");
     fprintf(stderr,
-	    "  -T Monitor activity of trackpoint with the specified name.\n");
+        "  -T Monitor activity of trackpoint with the specified name.\n");
+    fprintf(stderr, "  -I How many seconds to wait after the last\n");
+    fprintf(stderr, "     trackpoint movement before deactivating trackpoint \n");
+    fprintf(stderr, "     mode.\n");
     fprintf(stderr, "  -R Use the XRecord extension.\n");
     fprintf(stderr, "  -v Print diagnostic messages.\n");
     fprintf(stderr, "  -? Show this help message.\n");
@@ -126,6 +138,7 @@ toggle_touchpad(Bool enable)
     if (pad_disabled && enable) {
         data = previous_state;
         pad_disabled = False;
+        trackpoint_mode = False;
         if (verbose)
             printf("Enable\n");
     }
@@ -141,6 +154,33 @@ toggle_touchpad(Bool enable)
         return;
 
     /* This potentially overwrites a different client's setting, but ... */
+    XChangeDeviceProperty(display, dev, touchpad_off_prop, XA_INTEGER, 8,
+                          PropModeReplace, &data, 1);
+    XFlush(display);
+}
+
+/**
+ * Toggle TrackPoint mode on the touchpad
+ */
+static void
+toggle_trackpoint()
+{
+    unsigned char data;
+
+    /* Don't do anything if the user manually disabled the touchpad or manually
+     * put the touchpad into trackpoint mode */
+    if ((!pad_disabled && previous_state == TouchpadOff) ||
+        (!trackpoint_mode && previous_state == TrackpointMode))
+        return;
+
+    if (!pad_disabled)
+        store_current_touchpad_state();
+    pad_disabled = True;
+    trackpoint_mode = True;
+    data = TrackpointMode;
+    if (verbose)
+        printf("Switching to TrackPoint mode\n");
+
     XChangeDeviceProperty(display, dev, touchpad_off_prop, XA_INTEGER, 8,
                           PropModeReplace, &data, 1);
     XFlush(display);
@@ -208,37 +248,36 @@ trackpoint_activity(Display * display)
     int diff_x = 0, diff_y = 0;
 
     XDeviceState   *state;
-    XInputClass	   *data;
+    XInputClass    *data;
     XValuatorState *val_state;
-    
+
     state = XQueryDeviceState(display, tp_dev);
 
     /* Get current Trackpoint coordinates  */
     if (state) {
         data = state->data;
-	for(i=0; i<state->num_classes; ++i) {
-	    if (data->class == ValuatorClass) {
-	        val_state = (XValuatorState *) data;
-		tppos = (CursorPosition *) val_state->valuators;
-	    }
-	    data = (XInputClass *) ((char *) data + data->length);	  
-	}
-	XFreeDeviceState(state);
+        for(i=0; i<state->num_classes; ++i) {
+            if (data->class == ValuatorClass) {
+                val_state = (XValuatorState *) data;
+                tppos = (CursorPosition *) val_state->valuators;
+            }
+            data = (XInputClass *) ((char *) data + data->length);    
+        }
+        XFreeDeviceState(state);
     }
 
     /* Compare coordinates */
     if (old_tppos.x >= 0) {
-	diff_x = ~(old_tppos.x - tppos->x)+1;
-	diff_y = ~(old_tppos.y - tppos->y)+1;
-	if (diff_x > TP_DEAD_ZONE || diff_y > TP_DEAD_ZONE) {
-	    ret = 1;
-	}
+        diff_x = ~(old_tppos.x - tppos->x)+1;
+        diff_y = ~(old_tppos.y - tppos->y)+1;
+        if (diff_x > TP_DEAD_ZONE || diff_y > TP_DEAD_ZONE) {
+            ret = 1;
+        }
     }
-    
+
     /* Copy over old values */
     old_tppos.x = tppos->x;
     old_tppos.y = tppos->y;
-
 
     return ret;
 }
@@ -285,37 +324,42 @@ get_time(void)
 }
 
 static void
-main_loop(Display * display, double idle_time, int poll_delay)
+main_loop(Display * display, double keyboard_idle_time,
+          double trackpoint_idle_time, int poll_delay)
 {
-    double last_activity = 0.0;
     double current_time;
-    int activity = 0;
+    double idle_time;
+    double last_activity_time;
 
-    keyboard_activity(display);
+    if (monitor_keyboard)
+	keyboard_activity(display);
 
     for (;;) {
         current_time = get_time();
-        activity     = keyboard_activity(display);
-	
-	if (monitor_trackpoint) {
-	    activity = activity || trackpoint_activity(display);
-	}
 
-        if (activity)
-            last_activity = current_time;
-
-        /* If system times goes backwards, touchpad can get locked. Make
-         * sure our last activity wasn't in the future and reset if it was. */
-        if (last_activity > current_time)
-            last_activity = current_time - idle_time - 1;
-
-        if (current_time > last_activity + idle_time) { /* Enable touchpad */
-            toggle_touchpad(True);
+        /* If system time goes backwards, touchpad can get locked. Make sure out
+         * last activity wasn't in the future and reset it if it was. */
+        
+        if (monitor_trackpoint && trackpoint_activity(display)) {
+            toggle_trackpoint();
+            last_activity_time = current_time;
+            idle_time = trackpoint_idle_time;
         }
-        else {                  /* Disable touchpad */
+        else if (monitor_keyboard && keyboard_activity(display)) {
             toggle_touchpad(False);
+            last_activity_time = current_time;
+            idle_time = keyboard_idle_time;
         }
+	else if (pad_disabled) {
+	    if (last_activity_time > current_time)
+		last_activity_time = 0.0;
 
+	    if (current_time > last_activity_time + idle_time) {
+		toggle_touchpad(True);
+		continue;
+	    }
+	}
+        
         usleep(poll_delay);
     }
 }
@@ -460,7 +504,7 @@ is_modifier_pressed(const struct xrecord_callback_results *cbres)
 }
 
 void
-record_main_loop(Display * display, double idle_time)
+record_main_loop(Display * display, double keyboard_idle_time)
 {
 
     struct xrecord_callback_results cbres;
@@ -531,8 +575,8 @@ record_main_loop(Display * display, double idle_time)
 
         if (disable_event) {
             /* adjust the enable_time */
-            timeout.tv_sec = (int) idle_time;
-            timeout.tv_usec = (idle_time - (double) timeout.tv_sec) * 1.e6;
+            timeout.tv_sec = (int) keyboard_idle_time;
+            timeout.tv_usec = (keyboard_idle_time - (double) timeout.tv_sec) * 1.e6;
 
             toggle_touchpad(False);
         }
@@ -620,9 +664,9 @@ trackpoint_get_device(Display * dpy)
     info = XListInputDevices(dpy, &ndevices);
 
     while (ndevices--) {
-	if (info[ndevices].type == trackpoint_type &&
-	    strcmp(info[ndevices].name, trackpoint_name) == 0) {
-	    dev = XOpenDevice(dpy, info[ndevices].id);
+    if (info[ndevices].type == trackpoint_type &&
+        strcmp(info[ndevices].name, trackpoint_name) == 0) {
+        dev = XOpenDevice(dpy, info[ndevices].id);
             if (!dev) {
                 fprintf(stderr, "Failed to open device '%s'.\n",
                         info[ndevices].name);
@@ -647,16 +691,17 @@ trackpoint_get_device(Display * dpy)
 int
 main(int argc, char *argv[])
 {
-    double idle_time = 2.0;
+    double keyboard_idle_time = 2.0;
+    double trackpoint_idle_time = 2.0;
     int poll_delay = 200000;    /* 200 ms */
     int c;
     int use_xrecord = 0;
 
     /* Parse command line parameters */
-    while ((c = getopt(argc, argv, "i:m:dtp:kKRT:?v")) != EOF) {
+    while ((c = getopt(argc, argv, "i:m:dtp:kKBRT:I:?v")) != EOF) {
         switch (c) {
         case 'i':
-            idle_time = atof(optarg);
+            keyboard_idle_time = atof(optarg);
             break;
         case 'm':
             poll_delay = atoi(optarg) * 1000;
@@ -677,10 +722,16 @@ main(int argc, char *argv[])
             ignore_modifier_combos = 1;
             ignore_modifier_keys = 1;
             break;
-	case 'T':
-	    monitor_trackpoint = 1;
-	    trackpoint_name = optarg;
-	    break;
+        case 'B':
+            monitor_keyboard = True;
+            break;
+        case 'T':
+            monitor_trackpoint = True;
+            trackpoint_name = optarg;
+            break;
+        case 'I':
+            trackpoint_idle_time = atof(optarg);
+            break;
         case 'R':
             use_xrecord = 1;
             break;
@@ -693,8 +744,15 @@ main(int argc, char *argv[])
             break;
         }
     }
-    if (idle_time <= 0.0)
+    if (keyboard_idle_time <= 0.0 ||
+        trackpoint_idle_time <= 0.0)
         usage();
+
+    /* If neither keyboard tracking or trackpoint tracking were explicitly
+     * enabled, default to just keyboard tracking
+     */
+    if (!monitor_trackpoint)
+        monitor_keyboard = True;
 
     /* Open a connection to the X server */
     display = XOpenDisplay(NULL);
@@ -707,7 +765,7 @@ main(int argc, char *argv[])
         exit(2);
 
     if (!(tp_dev = trackpoint_get_device(display))) {
-	monitor_trackpoint = 0;
+    monitor_trackpoint = 0;
     }
 
     /* Install a signal handler to restore synaptics parameters on exit */
@@ -740,12 +798,13 @@ main(int argc, char *argv[])
     }
 
     pad_disabled = False;
+    trackpoint_mode = False;
     store_current_touchpad_state();
 
 #ifdef HAVE_X11_EXTENSIONS_RECORD_H
     if (use_xrecord) {
         if (check_xrecord(display))
-            record_main_loop(display, idle_time);
+            record_main_loop(display, keyboard_idle_time);
         else {
             fprintf(stderr, "Use of XRecord requested, but failed to "
                     " initialize.\n");
@@ -758,7 +817,7 @@ main(int argc, char *argv[])
         setup_keyboard_mask(display, ignore_modifier_keys);
 
         /* Run the main loop */
-        main_loop(display, idle_time, poll_delay);
+        main_loop(display, keyboard_idle_time, trackpoint_idle_time, poll_delay);
     }
     return 0;
 }
