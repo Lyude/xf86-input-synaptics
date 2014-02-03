@@ -3,21 +3,33 @@
 .TH syndaemon __appmansuffix__ __vendorversion__
 .SH NAME
 .LP
-syndaemon \- a program that monitors keyboard activity and disables
-the touchpad when the keyboard is being used.
+syndaemon \- a program that monitors keyboard and/or TrackPoint activity and
+changes the touchpad's settings accordingly.
 .SH "SYNOPSIS"
 .LP
 syndaemon [\fI\-i idle\-time\fP] [\fI\-m poll-inverval\fP] [\fI\-d\fP] [\fI\-p pid\-file\fP]
 [\fI\-t\fP] [\fI\-k\fP] [\fI\-K\fP] [\fI\-R\fP]
 .SH "DESCRIPTION"
 .LP
-Disabling the touchpad while typing avoids unwanted movements of the
-pointer that could lead to giving focus to the wrong window.
+syndaemon has two functions:
+.IP \(bu 4
+Disabling the touchpad whenever the user is typing, in order to avoid unwanted
+movements of the pointer that could lead to giving focus to the wrong window.
+.IP \(bu 4
+Switching the touchpad into TrackPoint mode whenever the TrackPoint is being
+used. This makes TrackPoints lacking physical buttons far more useful, since
+accidentally moving the cursor and being unable to press the soft buttons with
+the touchpad while using the TrackPoint is no longer an issue.
 .
 .SH "OPTIONS"
 .LP
 .TP
-\fB\-i\fR <\fIidle\-time\fP>
+\fB\-B\fR
+Monitors the keyboard activity and shuts off the touchpad accordingly. If
+neither \fB\-B\fR or \fB\-T\fR are specified, syndaemon will default to this.
+.LP
+.TP
+\fB\-i\fR <\fIkeyboard\-idle\-time\fP>
 How many seconds to wait after the last key press before enabling the
 touchpad.
 .
@@ -63,6 +75,22 @@ Use the XRecord extension for detecting keyboard activity instead of polling
 the keyboard state.
 .LP
 .TP
+\fB\-T\fR <\fItrackpoint\-name\fP>
+Monitors the TrackPoint activity from \fItrackpoint\-name\fP and switches the
+touchpad into TrackPoint mode when movement is detected from the TrackPoint.
+When in TrackPoint mode although clickpad button presses are still enabled,
+movement of the cursor is not enabled and the clickpad's soft buttons (if there
+are any) will be located at an alternate location (usually closer to the
+TrackPoint).
+.LP
+.TP
+\fB\-I\fR <\fItrackpoint-idle-time\fP>
+How many seconds to wait after the last TrackPoint movement before switching the
+touchpad out of TrackPoint mode.
+.
+Default is 2.0s
+.LP
+.TP
 \fB\-?\fP
 Show the help message.
 .SH "ENVIRONMENT VARIABLES"
@@ -95,11 +123,15 @@ XRECORD requested but not available or usable on the server.
 It doesn't make much sense to connect to a remote X server, because
 the daemon will then monitor the remote server for keyboard activity,
 but will disable the touchpad on the local machine.
+.LP
+At the moment, the only way for syndaemon to monitor the TrackPoint is by
+polling at a specific interval, which can be a bit ineffeciant on batteries.
 .SH "AUTHORS"
 .LP
 Peter Osterlund <petero2@telia.com>.
+Lyude <thatslyude@gmail.com>.
 .TP
-This man page was written by Mattia Dongili <malattia@debian.org>
+This man page was originally written by Mattia Dongili <malattia@debian.org>
 .SH "SEE ALSO"
 .LP
 __xservername__(__appmansuffix__), synclient(__appmansuffix__), synaptics(__drivermansuffix__)
