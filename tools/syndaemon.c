@@ -32,10 +32,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/extensions/XInput.h>
-#ifdef HAVE_X11_EXTENSIONS_RECORD_H
-#include <X11/Xproto.h>
-#include <X11/extensions/record.h>
-#endif                          /* HAVE_X11_EXTENSIONS_RECORD_H */
+#include <X11/extensions/sync.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,11 +64,12 @@ static const char *pid_file;
 static const char *trackpoint_name;
 static Display *display;
 static XDevice *dev;
-static XDevice *tp_dev; /* trackpoint device */
+static int trackpoint_id; /* trackpoint device */
 static Atom touchpad_off_prop;
 static enum TouchpadState previous_state;
 static enum TouchpadState disable_state = TouchpadOff;
 static int verbose;
+static int sync_event;
 
 #define KEYMAP_SIZE 32
 static unsigned char keyboard_mask[KEYMAP_SIZE];
@@ -105,7 +103,8 @@ usage(void)
     fprintf(stderr, "  -I How many seconds to wait after the last\n");
     fprintf(stderr, "     trackpoint movement before deactivating trackpoint \n");
     fprintf(stderr, "     mode.\n");
-    fprintf(stderr, "  -R Use the XRecord extension.\n");
+    fprintf(stderr, "  -R Use the XRecord extension for monitoring the "
+                    "     keyboard.\n");
     fprintf(stderr, "  -v Print diagnostic messages.\n");
     fprintf(stderr, "  -? Show this help message.\n");
     exit(1);
@@ -140,15 +139,24 @@ toggle_touchpad(Bool enable)
         pad_disabled = False;
         trackpoint_mode = False;
         if (verbose)
-            printf("Enable\n");
+            printf("Touchpad enabled.\n");
     }
-    else if (!pad_disabled && !enable &&
+    else if (!enable &&
              previous_state != disable_state && previous_state != TouchpadOff) {
-        store_current_touchpad_state();
+        /* If we're switching from TrackPoint mode to our disable state, don't
+         * get rid of the last state */
+        if (!pad_disabled)
+            store_current_touchpad_state();
+        /* If we're not switching from TrackPoint mode and the touchpad was
+         * already enabled, then the user probably manually changed it, ignore
+         * this event */
+        else if (!trackpoint_mode)
+            return;
+
         pad_disabled = True;
         data = disable_state;
         if (verbose)
-            printf("Disable\n");
+            printf("Touchpad disabled.\n");
     }
     else
         return;
@@ -234,6 +242,19 @@ typedef struct {
     int y;
 } CursorPosition;
 
+static int
+setup_xsync(Display * display)
+{
+    int sync_error;
+    int sync_major, sync_minor;
+
+    if (!XSyncQueryExtension(display, &sync_event, &sync_error))
+        return 1;
+
+    XSyncInitialize(display, &sync_major, &sync_minor);
+    return 0;
+}
+
 /**
  * Return non-zero if the trackpoint state has changed since the last call.
  */
@@ -251,7 +272,7 @@ trackpoint_activity(Display * display)
     XInputClass    *data;
     XValuatorState *val_state;
 
-    state = XQueryDeviceState(display, tp_dev);
+    /*state = XQueryDeviceState(display, tp_dev);*/ //TODO: UNCOMMENT THIS
 
     /* Get current Trackpoint coordinates  */
     if (state) {
@@ -284,6 +305,7 @@ trackpoint_activity(Display * display)
 
 /**
  * Return non-zero if the keyboard state has changed since the last call.
+ * Only used when xsync or xrecord are not being used
  */
 static int
 keyboard_activity(Display * display)
@@ -393,205 +415,32 @@ setup_keyboard_mask(Display * display, int ignore_modifier_keys)
     }
 }
 
-/* ---- the following code is for using the xrecord extension ----- */
-#ifdef HAVE_X11_EXTENSIONS_RECORD_H
-
-#define MAX_MODIFIERS 16
-
-/* used for exchanging information with the callback function */
-struct xrecord_callback_results {
-    XModifierKeymap *modifiers;
-    Bool key_event;
-    Bool non_modifier_event;
-    KeyCode pressed_modifiers[MAX_MODIFIERS];
-};
-
-/* test if the xrecord extension is found */
-Bool
-check_xrecord(Display * display)
-{
-
-    Bool found;
-    Status status;
-    int major_opcode, minor_opcode, first_error;
-    int version[2];
-
-    found = XQueryExtension(display,
-                            "RECORD",
-                            &major_opcode, &minor_opcode, &first_error);
-
-    status = XRecordQueryVersion(display, version, version + 1);
-    if (verbose && status) {
-        printf("X RECORD extension version %d.%d\n", version[0], version[1]);
-    }
-    return found;
-}
-
-/* called by XRecordProcessReplies() */
-void
-xrecord_callback(XPointer closure, XRecordInterceptData * recorded_data)
-{
-
-    struct xrecord_callback_results *cbres;
-    xEvent *xev;
-    int nxev;
-
-    cbres = (struct xrecord_callback_results *) closure;
-
-    if (recorded_data->category != XRecordFromServer) {
-        XRecordFreeData(recorded_data);
-        return;
-    }
-
-    nxev = recorded_data->data_len / 8;
-    xev = (xEvent *) recorded_data->data;
-    while (nxev--) {
-
-        if ((xev->u.u.type == KeyPress) || (xev->u.u.type == KeyRelease)) {
-            int i;
-            int is_modifier = 0;
-
-            cbres->key_event = 1;       /* remember, a key was pressed or released. */
-
-            /* test if it was a modifier */
-            for (i = 0; i < 8 * cbres->modifiers->max_keypermod; i++) {
-                KeyCode kc = cbres->modifiers->modifiermap[i];
-
-                if (kc == xev->u.u.detail) {
-                    is_modifier = 1;    /* yes, it is a modifier. */
-                    break;
-                }
-            }
-
-            if (is_modifier) {
-                if (xev->u.u.type == KeyPress) {
-                    for (i = 0; i < MAX_MODIFIERS; ++i)
-                        if (!cbres->pressed_modifiers[i]) {
-                            cbres->pressed_modifiers[i] = xev->u.u.detail;
-                            break;
-                        }
-                }
-                else {          /* KeyRelease */
-                    for (i = 0; i < MAX_MODIFIERS; ++i)
-                        if (cbres->pressed_modifiers[i] == xev->u.u.detail)
-                            cbres->pressed_modifiers[i] = 0;
-                }
-
-            }
-            else {
-                /* remember, a non-modifier was pressed. */
-                cbres->non_modifier_event = 1;
-            }
-        }
-
-        xev++;
-    }
-
-    XRecordFreeData(recorded_data);     /* cleanup */
-}
-
 static int
-is_modifier_pressed(const struct xrecord_callback_results *cbres)
-{
-    int i;
+get_device_id_by_name(Display * display, const char * dev_name,
+                      char * dev_type) {
+    XDeviceInfo * info = NULL;
+    int ndevices = 0;
+    int dev_id = 0;
+    Atom dev_type_atom;
 
-    for (i = 0; i < MAX_MODIFIERS; ++i)
-        if (cbres->pressed_modifiers[i])
-            return 1;
+    dev_type_atom =
+        (dev_type != NULL) ? XInternAtom(display, dev_type, True) : 0;
+    info = XListInputDevices(display, &ndevices);
 
-    return 0;
+    while (ndevices--) {
+        if (info[ndevices].type == dev_type_atom &&
+            strcmp(info[ndevices].name, dev_name) == 0) {
+            dev_id = info[ndevices].id;
+            break;
+        }
+    }
+
+    XFreeDeviceList(info);
+    return dev_id;
 }
-
-void
-record_main_loop(Display * display, double keyboard_idle_time)
-{
-
-    struct xrecord_callback_results cbres;
-    XRecordContext context;
-    XRecordClientSpec cspec = XRecordAllClients;
-    Display *dpy_data;
-    XRecordRange *range;
-    int i;
-
-    dpy_data = XOpenDisplay(NULL);      /* we need an additional data connection. */
-    range = XRecordAllocRange();
-
-    range->device_events.first = KeyPress;
-    range->device_events.last = KeyRelease;
-
-    context = XRecordCreateContext(dpy_data, 0, &cspec, 1, &range, 1);
-
-    XRecordEnableContextAsync(dpy_data, context, xrecord_callback,
-                              (XPointer) & cbres);
-
-    cbres.modifiers = XGetModifierMapping(display);
-    /* clear list of modifiers */
-    for (i = 0; i < MAX_MODIFIERS; ++i)
-        cbres.pressed_modifiers[i] = 0;
-
-    while (1) {
-
-        int fd = ConnectionNumber(dpy_data);
-        fd_set read_fds;
-        int ret;
-        int disable_event = 0;
-        struct timeval timeout;
-
-        FD_ZERO(&read_fds);
-        FD_SET(fd, &read_fds);
-
-        ret = select(fd + 1 /* =(max descriptor in read_fds) + 1 */ ,
-                     &read_fds, NULL, NULL,
-                     pad_disabled ? &timeout : NULL
-                     /* timeout only required for enabling */ );
-
-        if (FD_ISSET(fd, &read_fds)) {
-
-            cbres.key_event = 0;
-            cbres.non_modifier_event = 0;
-
-            XRecordProcessReplies(dpy_data);
-
-            /* If there are any events left over, they are in error. Drain them
-             * from the connection queue so we don't get stuck. */
-            while (XEventsQueued(dpy_data, QueuedAlready) > 0) {
-                XEvent event;
-
-                XNextEvent(dpy_data, &event);
-                fprintf(stderr, "bad event received, major opcode %d\n",
-                        event.type);
-            }
-
-            if (!ignore_modifier_keys && cbres.key_event) {
-                disable_event = 1;
-            }
-
-            if (cbres.non_modifier_event &&
-                !(ignore_modifier_combos && is_modifier_pressed(&cbres))) {
-                disable_event = 1;
-            }
-        }
-
-        if (disable_event) {
-            /* adjust the enable_time */
-            timeout.tv_sec = (int) keyboard_idle_time;
-            timeout.tv_usec = (keyboard_idle_time - (double) timeout.tv_sec) * 1.e6;
-
-            toggle_touchpad(False);
-        }
-
-        if (ret == 0 && pad_disabled) { /* timeout => enable event */
-            toggle_touchpad(True);
-        }
-
-    }                           /* end while(1) */
-
-    XFreeModifiermap(cbres.modifiers);
-}
-#endif                          /* HAVE_X11_EXTENSIONS_RECORD_H */
 
 static XDevice *
-dp_get_device(Display * dpy)
+dp_get_device(Display * display)
 {
     XDevice *dev = NULL;
     XDeviceInfo *info = NULL;
@@ -601,13 +450,13 @@ dp_get_device(Display * dpy)
     int nprops = 0;
     int error = 0;
 
-    touchpad_type = XInternAtom(dpy, XI_TOUCHPAD, True);
-    touchpad_off_prop = XInternAtom(dpy, SYNAPTICS_PROP_OFF, True);
-    info = XListInputDevices(dpy, &ndevices);
+    touchpad_type = XInternAtom(display, XI_TOUCHPAD, True);
+    touchpad_off_prop = XInternAtom(display, SYNAPTICS_PROP_OFF, True);
+    info = XListInputDevices(display, &ndevices);
 
     while (ndevices--) {
         if (info[ndevices].type == touchpad_type) {
-            dev = XOpenDevice(dpy, info[ndevices].id);
+            dev = XOpenDevice(display, info[ndevices].id);
             if (!dev) {
                 fprintf(stderr, "Failed to open device '%s'.\n",
                         info[ndevices].name);
@@ -615,7 +464,7 @@ dp_get_device(Display * dpy)
                 goto unwind;
             }
 
-            properties = XListDeviceProperties(dpy, dev, &nprops);
+            properties = XListDeviceProperties(display, dev, &nprops);
             if (!properties || !nprops) {
                 fprintf(stderr, "No properties on device '%s'.\n",
                         info[ndevices].name);
@@ -644,57 +493,188 @@ dp_get_device(Display * dpy)
     if (!dev)
         fprintf(stderr, "Unable to find a synaptics device.\n");
     else if (error && dev) {
-        XCloseDevice(dpy, dev);
+        XCloseDevice(display, dev);
         dev = NULL;
     }
     return dev;
 }
 
-static XDevice *
-trackpoint_get_device(Display * dpy)
-{
-    XDevice *dev = NULL;
-    XDeviceInfo *info = NULL;
-    int ndevices = 0;
-    Atom trackpoint_type = 0;
-    int error = 0;
+static XSyncAlarm
+setup_device_alarm(Display * display, int device_id, int wait_time) {
+    XSyncAlarm alarm;
+    int alarm_flags;
+    XSyncAlarmAttributes attr;
+    XSyncValue delta, interval;
 
-    trackpoint_type = XInternAtom(dpy, XI_MOUSE, True);
-    info = XListInputDevices(dpy, &ndevices);
+    int ncounters;
+    char idle_counter_name[20];
+    XSyncCounter counter = 0;
+    XSyncSystemCounter * counters;
 
-    while (ndevices--) {
-    if (info[ndevices].type == trackpoint_type &&
-        strcmp(info[ndevices].name, trackpoint_name) == 0) {
-        dev = XOpenDevice(dpy, info[ndevices].id);
-            if (!dev) {
-                fprintf(stderr, "Failed to open device '%s'.\n",
-                        info[ndevices].name);
-                error = 1;
-                goto unwind;
-            }
+    snprintf(&idle_counter_name[0], sizeof(idle_counter_name),
+             "DEVICEIDLETIME %d", device_id);
+    counters = XSyncListSystemCounters(display, &ncounters);
+
+    /* Find the idle counter for the trackpoint */
+    for (int i = 0; i < ncounters; i++) {
+        if (strcmp(counters[i].name, &idle_counter_name[0]) == 0) {
+            counter = counters[i].counter;
             break;
         }
     }
 
- unwind:
-    XFreeDeviceList(info);
+    if (counter == 0) 
+        return 0;
+
+    XSyncFreeSystemCounterList(counters);
+
+    XSyncIntToValue(&delta, 0);
+    XSyncIntToValue(&interval, wait_time);
+
+    attr.trigger.counter = counter;
+    attr.trigger.test_type = XSyncNegativeTransition;
+    attr.trigger.value_type = XSyncAbsolute;
+    attr.trigger.wait_value = interval;
+    attr.delta = delta;
+    attr.events = True;
+
+    alarm_flags = XSyncCACounter | XSyncCAValueType | XSyncCATestType |
+                  XSyncCAValue | XSyncCADelta;
+
+    alarm = XSyncCreateAlarm(display, alarm_flags, &attr);
+    return alarm;
+}
+
+static Status change_alarm_trigger(Display * display, XSyncAlarm alarm,
+                                   XSyncTestType test_type, int wait_time)
+{
+    XSyncAlarmAttributes attr;
+    XSyncValue interval;
+    Bool status;
+
+    XSyncQueryAlarm(display, alarm, &attr);
+
+    XSyncIntToValue(&interval, wait_time);
+    
+    attr.trigger.test_type = test_type;
+    attr.trigger.wait_value = interval;
+
+    status = XSyncChangeAlarm(display, alarm, XSyncCACounter | XSyncCAValueType |
+                              XSyncCATestType | XSyncCAValue | XSyncCADelta,
+                              &attr);
+    XFlush(display);
+    return status;
+}
+
+// TODO: Set this up to open the device the ID passed to it corresponds to.
+static XDevice *
+trackpoint_get_device(Display * display)
+{
+    XDevice *dev = NULL;
+    int error = 0;
+    
+    dev = XOpenDevice(display, trackpoint_id);
+
     if (!dev)
         fprintf(stderr, "Unable to find a trackpoint device.\n");
     else if (error && dev) {
-        XCloseDevice(dpy, dev);
+        XCloseDevice(display, dev);
         dev = NULL;
     }
     return dev;
 }
 
 int
+xsync_loop(Display * display, double keyboard_idle_time,
+           double trackpoint_idle_time)
+{
+    XSyncAlarm keyboard_alarm;
+    XSyncAlarm trackpoint_alarm;
+
+    if (monitor_trackpoint)
+        trackpoint_alarm = setup_device_alarm(display, trackpoint_id,
+                                              trackpoint_idle_time);
+    if (monitor_keyboard) {
+        int dev_id = get_device_id_by_name(display, "Virtual core keyboard", 0);
+        keyboard_alarm = setup_device_alarm(display, dev_id, keyboard_idle_time);
+    }
+
+    for (;;) {
+        XEvent ev;
+        XSyncAlarmNotifyEvent * alarm_event;
+
+        XNextEvent(display, &ev);
+
+        if (ev.type != sync_event + XSyncAlarmNotify)
+            exit(0);
+
+        alarm_event = (XSyncAlarmNotifyEvent *)&ev;
+
+        if (alarm_event->alarm == trackpoint_alarm) {
+            if (pad_disabled && trackpoint_mode) {
+                toggle_touchpad(True);
+                change_alarm_trigger(display, trackpoint_alarm,
+                                     XSyncNegativeTransition,
+                                     trackpoint_idle_time);
+            }
+            else {
+                /* Change the alarm so it goes off when the trackpoint is idle
+                 * again */
+                toggle_trackpoint();
+                change_alarm_trigger(display, trackpoint_alarm,
+                                     XSyncPositiveTransition,
+                                     trackpoint_idle_time);
+
+                /* Reset the keyboard alarm if we're monitoring that too */
+                if (monitor_keyboard)
+                    change_alarm_trigger(display, keyboard_alarm,
+                                         XSyncNegativeTransition,
+                                         keyboard_idle_time);
+            }
+        }
+        else if (alarm_event->alarm == keyboard_alarm) {
+            if (pad_disabled && !trackpoint_mode) {
+                toggle_touchpad(True);
+                change_alarm_trigger(display, keyboard_alarm,
+                                     XSyncNegativeTransition,
+                                     keyboard_idle_time);
+            }
+            else {
+                if (ignore_modifier_keys) {
+                    unsigned char key_state[KEYMAP_SIZE];
+
+                    XQueryKeymap(display, (char *) key_state);
+
+                    for (int i = 0; i < KEYMAP_SIZE; i++) {
+                        if (key_state[i] & ~keyboard_mask[i])
+                            continue;
+                    }
+                }
+
+                toggle_touchpad(False);
+                /* Change the alarm so it goes off when the trackpoint is idle
+                 * again */
+                change_alarm_trigger(display, keyboard_alarm,
+                                     XSyncPositiveTransition,
+                                     keyboard_idle_time);
+
+                /* Reset the TrackPoint alarm if we're monitoring that too */
+                if (monitor_trackpoint)
+                    change_alarm_trigger(display, trackpoint_alarm,
+                                         XSyncNegativeTransition,
+                                         trackpoint_idle_time);
+            }
+        }
+    }
+}
+
+int
 main(int argc, char *argv[])
 {
-    double keyboard_idle_time = 2.0;
-    double trackpoint_idle_time = 2.0;
+    double keyboard_idle_time = 2000.0;
+    double trackpoint_idle_time = 2000.0;
     int poll_delay = 200000;    /* 200 ms */
     int c;
-    int use_xrecord = 0;
 
     /* Parse command line parameters */
     while ((c = getopt(argc, argv, "i:m:dtp:kKBRT:I:?v")) != EOF) {
@@ -732,7 +712,7 @@ main(int argc, char *argv[])
             trackpoint_idle_time = atof(optarg);
             break;
         case 'R':
-            use_xrecord = 1;
+            /* Does nothing, kept for historical reasons */
             break;
         case 'v':
             verbose = 1;
@@ -755,17 +735,13 @@ main(int argc, char *argv[])
 
     /* Open a connection to the X server */
     display = XOpenDisplay(NULL);
-    if (!display) {
+    if (!display) { 
         fprintf(stderr, "Can't open display.\n");
         exit(2);
     }
 
     if (!(dev = dp_get_device(display)))
         exit(2);
-
-    if (!(tp_dev = trackpoint_get_device(display))) {
-    monitor_trackpoint = 0;
-    }
 
     /* Install a signal handler to restore synaptics parameters on exit */
     install_signal_handler();
@@ -800,25 +776,34 @@ main(int argc, char *argv[])
     trackpoint_mode = False;
     store_current_touchpad_state();
 
-#ifdef HAVE_X11_EXTENSIONS_RECORD_H
-    if (use_xrecord) {
-        if (check_xrecord(display))
-            record_main_loop(display, keyboard_idle_time);
-        else {
-            fprintf(stderr, "Use of XRecord requested, but failed to "
-                    " initialize.\n");
-            exit(4);
-        }
-    }
-    else
-#endif                          /* HAVE_X11_EXTENSIONS_RECORD_H */
-    {
+    if (monitor_keyboard && ignore_modifier_keys)
         setup_keyboard_mask(display, ignore_modifier_keys);
 
-        /* Run the main loop */
-        main_loop(display, keyboard_idle_time, trackpoint_idle_time, poll_delay);
+    /* Setup the trackpoint if we're supposed to monitor it */
+    if (monitor_trackpoint) {
+        trackpoint_id = get_device_id_by_name(display, trackpoint_name,
+                                              XI_MOUSE);
+        if (trackpoint_id == 0) {
+            fprintf(stderr,
+                    "Can't a TrackPoint to monitor. The TrackPoint name you "
+                    "gave might be incorrect, or may not be a TrackPoint.\n");
+            exit(2);
+        }
     }
+                    
+
+    /* Try to use xsync */
+    if (setup_xsync(display) == 0)
+        xsync_loop(display, keyboard_idle_time, trackpoint_idle_time);
+    else {
+        fprintf(stderr,
+                "Warning: Could not setup XSync, falling back to normal "
+                "polling.\n");
+        main_loop(display, keyboard_idle_time, trackpoint_idle_time,
+                  poll_delay);
+    }
+
     return 0;
 }
 
-/* vim: set noexpandtab tabstop=8 shiftwidth=4: */
+/* vim: set expandtab tabstop=8 shiftwidth=4: */

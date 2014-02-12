@@ -135,19 +135,19 @@ AM_CONDITIONAL([BUILD_PS2COMM], [test "x${BUILD_PS2COMM}" = "xyes"])
 #			Dependencies for synclient and syndaemon
 # -----------------------------------------------------------------------------
 # Obtain compiler/linker options for the Synaptics apps dependencies
-PKG_CHECK_MODULES(XI, x11 inputproto [xi >= 1.2])
+PKG_CHECK_MODULES(XI, x11 inputproto [xi >= 1.2] xext)
 
-# The syndaemon program uses an optional XRecord extension implementation
-# If libxtst >= 1.0.99 is installed, Cflags contains the path to record.h
-# If recordproto < 1.13.99.1 is installed, Cflags contains the path to record.h
-PKG_CHECK_MODULES(XTST, xtst recordproto, have_libxtst="yes", have_libxtst="no")
-if test "x$have_libxtst" = "xyes" ; then
-   # Header record.h may come from the xtst or recordproto package, or may be missing
-   SAVE_CPPFLAGS="$CPPFLAGS"
-   CPPFLAGS="$CPPFLAGS $XTST_CFLAGS"
-   AC_CHECK_HEADERS([X11/extensions/record.h],,,[#include <X11/Xlib.h>])
-   CPPFLAGS="$SAVE_CPPFLAGS"
-fi
+## The syndaemon program uses an optional XRecord extension implementation
+## If libxtst >= 1.0.99 is installed, Cflags contains the path to record.h
+## If recordproto < 1.13.99.1 is installed, Cflags contains the path to record.h
+#PKG_CHECK_MODULES(XTST, xtst recordproto, have_libxtst="yes", have_libxtst="no")
+#if test "x$have_libxtst" = "xyes" ; then
+   ## Header record.h may come from the xtst or recordproto package, or may be missing
+   #SAVE_CPPFLAGS="$CPPFLAGS"
+   #CPPFLAGS="$CPPFLAGS $XTST_CFLAGS"
+   #AC_CHECK_HEADERS([X11/extensions/record.h],,,[#include <X11/Xlib.h>])
+   #CPPFLAGS="$SAVE_CPPFLAGS"
+#fi
 # -----------------------------------------------------------------------------
 
 # Workaround overriding sdkdir to be able to create a tarball when user has no
