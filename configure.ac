@@ -135,7 +135,7 @@ AM_CONDITIONAL([BUILD_PS2COMM], [test "x${BUILD_PS2COMM}" = "xyes"])
 #			Dependencies for synclient and syndaemon
 # -----------------------------------------------------------------------------
 # Obtain compiler/linker options for the Synaptics apps dependencies
-PKG_CHECK_MODULES(XI, x11 inputproto [xi >= 1.2])
+PKG_CHECK_MODULES(XI, x11 inputproto xext [xi >= 1.2])
 
 # The syndaemon program uses an optional XRecord extension implementation
 # If libxtst >= 1.0.99 is installed, Cflags contains the path to record.h

@@ -28,4 +28,4 @@ synclient_SOURCES = synclient.c
 
 syndaemon_SOURCES = syndaemon.c
 syndaemon_CFLAGS = $(AM_CFLAGS) $(XTST_CFLAGS)
-syndaemon_LDFLAGS = $(AM_LDFLAGS) $(XTST_LIBS)
+syndaemon_LDFLAGS = $(AM_LDFLAGS) $(XTST_LIBS) $(XEXT_LIBS)

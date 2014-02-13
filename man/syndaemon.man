@@ -3,12 +3,11 @@
 .TH syndaemon __appmansuffix__ __vendorversion__
 .SH NAME
 .LP
-syndaemon \- a program that monitors keyboard activity and disables
-the touchpad when the keyboard is being used.
+syndaemon \- a program that monitors keyboard and/or pointing stick activity and
+disables the touchpad when either of them are being used.
 .SH "SYNOPSIS"
 .LP
-syndaemon [\fI\-i idle\-time\fP] [\fI\-m poll-inverval\fP] [\fI\-d\fP] [\fI\-p pid\-file\fP]
-[\fI\-t\fP] [\fI\-k\fP] [\fI\-K\fP] [\fI\-R\fP]
+syndaemon [\fI\-i idle\-time\fP] [\fI\-m poll-inverval\fP] [\fI\-d\fP] [\fI\-p pid\-file\fP] [\fI\-t\fP] [\fI\-P\fP [\fIpointing-stick\fP]] [\fI\-M\fP] [\fI\-k\fP] [\fI\-K\fP] [\fI\-R\fP]
 .SH "DESCRIPTION"
 .LP
 Disabling the touchpad while typing avoids unwanted movements of the
@@ -18,18 +17,17 @@ pointer that could lead to giving focus to the wrong window.
 .LP
 .TP
 \fB\-i\fR <\fIidle\-time\fP>
-How many seconds to wait after the last key press before enabling the
-touchpad.
+How many seconds to wait after the last key press or pointing stick activity
+before enabling the touchpad.
 .
 (default is 2.0s). 
 .LP
 .TP
 \fB\-m\fR <\fIpoll\-interval\fP>
 How many milliseconds to wait between two polling intervals. If this value is
-too low, it will cause unnecessary wake-ups. If this value is too high,
-some key presses (press and release happen between two intervals) may not
-be noticed. This switch has no effect when running with
-\fB-R\fP.
+too low, it will cause unnecessary wake-ups. If this value is too high, some key
+presses (press and release happen between two intervals) may not be noticed.
+This switch has no effect when running with \fB\-R\fP and/or \fB\-P\fP.
 .
 Default is 200ms.
 .LP
@@ -46,10 +44,30 @@ mode.
 .LP
 .TP
 \fB\-t\fP [off|tapping|click-only]
- Disable state. "off" for disabling the touchpad entirely, "tapping" for
- disabling tapping and scrolling only, "click-only" for disabling
- everything but physical clicks. The default if this option is missing is
- "off". If this option is given without a mode it defaults to "tapping".
+Disable state. "off" for disabling the touchpad entirely, "tapping" for
+disabling tapping and scrolling only, "click-only" for disabling everything but
+physical clicks. The default if this option is missing is "off". If this option
+is given without a mode it defaults to "tapping".
+.LP
+.TP
+\fB\-T\fP [off|tapping|click-only]
+Same as \fB\-t\fP, but sets the disable state for pointing stick monitoring.
+.LP
+.TP
+\fB\-P\fP [pointing-stick]
+Monitors the pointing stick for activity instead of keyboard activity. XSync
+support is required on the server for this to work. Useful on laptops that have
+a pointing stick but lack a set of physical buttons for their pointing stick.
+If this option is given without the name of a pointing stick, it defaults to
+"TPPS/2 IBM TrackPoint".
+.
+When using this option, keyboard monitoring is disabled unless explicitly
+enabled by specifying \fB\-R\fP or \fB\-M\fP.
+.LP
+.TP
+\fB\-M\fP
+Explicitly enables keyboard monitoring. This is the default behavior, unless
+\fB\-P\fP has been enabled.
 .LP
 .TP
 \fB\-k\fP
@@ -92,6 +110,16 @@ The fork into daemon mode failed or the pid file could not be created.
 .TP
 \fBExit code 4
 XRECORD requested but not available or usable on the server.
+.LP
+.TP
+\fBExit code 5
+Pointing stick monitoring requested, but XSync was not available or usable on
+the server.
+.LP
+.TP
+\fBExit code 6
+Pointing stick monitoring requested, but a pointing stick could not be found
+(try specifying the name manually when using \fB\-P\fP).
 .SH "CAVEATS"
 .LP
 It doesn't make much sense to connect to a remote X server, because
