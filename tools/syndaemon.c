@@ -359,13 +359,12 @@ main_loop(Display * display, int poll_delay)
         }
 
         if (monitor_pstick) {
-            if (poll_res != 0)
-                handle_pstick_events(display);
-
             /* Only have a timeout if we're doing plain monitoring for the
              * keyboard too */
             poll_res = poll(&pstick_pollfd, 1,
                             monitor_keyboard ? poll_delay : -1);
+            if (poll_res != 0)
+                handle_pstick_events(display);
         }
         else
             sleep(poll_delay);
